@@ -5,7 +5,8 @@
     .minimum_zig_version = "0.14.0",
     .dependencies = .{
         .quickjs = .{
-            .path = "../quickjs-zig",
+            .url = "git+https://github.com/sea-grass/quickjs-zig?ref=main#b6284947a7d9ce45ad78b5778df2e9e93ff16ce8",
+            .hash = "quickjs-0.0.0-h7npNw4HAADzhLcIm9aLQ1uC9xOOqw-x0p13W_YyjzUc",
         },
     },
     .paths = .{
