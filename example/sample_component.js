@@ -3,7 +3,14 @@ export const js = clientJs();
 export const html = render;
 
 function clientCss() {
-  return `.my-dropdown[data-open="false"] .items {
+  return `
+  .my-dropdown {
+border: 1px solid black;
+padding: 0.5em;
+
+  }
+
+  .my-dropdown[data-open="false"] .items {
   display: none; 
 }`;
 }

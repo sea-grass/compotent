@@ -15,22 +15,12 @@ pub fn build(b: *std.Build) void {
         .optimize = optimize,
     });
 
-    const lib_mod = b.createModule(.{
+    const lib_mod = b.addModule("compotent", .{
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
     });
-
     lib_mod.addImport("c", c_mod);
-
-    const exe_mod = b.createModule(.{
-        .root_source_file = b.path("src/main.zig"),
-        .target = target,
-        .optimize = optimize,
-    });
-
-    exe_mod.addImport("compotent_lib", lib_mod);
-    exe_mod.addImport("c", c_mod);
 
     const lib = b.addLibrary(.{
         .linkage = .static,
@@ -40,14 +30,16 @@ pub fn build(b: *std.Build) void {
 
     b.installArtifact(lib);
 
-    const exe = b.addExecutable(.{
-        .name = "compotent",
-        .root_module = exe_mod,
+    const example = b.addExecutable(.{
+        .name = "generate-static-site",
+        .root_source_file = b.path("example/main.zig"),
+        .target = target,
+        .optimize = optimize,
     });
+    example.root_module.addImport("compotent", lib_mod);
+    b.installArtifact(example);
 
-    b.installArtifact(exe);
-
-    const run_cmd = b.addRunArtifact(exe);
+    const run_cmd = b.addRunArtifact(example);
 
     run_cmd.step.dependOn(b.getInstallStep());
 
@@ -55,7 +47,7 @@ pub fn build(b: *std.Build) void {
         run_cmd.addArgs(args);
     }
 
-    const run_step = b.step("run", "Run the app");
+    const run_step = b.step("run", "Run the example");
     run_step.dependOn(&run_cmd.step);
 
     const lib_unit_tests = b.addTest(.{
@@ -65,7 +57,7 @@ pub fn build(b: *std.Build) void {
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
     const exe_unit_tests = b.addTest(.{
-        .root_module = exe_mod,
+        .root_module = example.root_module,
     });
 
     const run_exe_unit_tests = b.addRunArtifact(exe_unit_tests);

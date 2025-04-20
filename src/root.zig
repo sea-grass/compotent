@@ -1,4 +1,4 @@
-const c = @import("c");
+pub const c = @import("c");
 const debug = std.debug;
 const mem = std.mem;
 const std = @import("std");
@@ -8,7 +8,7 @@ pub const Data = struct {
     payload: c.JSValue,
 
     pub fn init(comptime T: type, ctx: *Context, payload: T) !Data {
-        const obj = try createObject(@TypeOf(payload), ctx, payload);
+        const obj = try createObject(T, ctx, payload);
         errdefer c.JS_FreeValue(ctx.ctx, obj);
 
         return .{ .payload = obj };
@@ -22,8 +22,15 @@ pub const Data = struct {
         const value = c.JS_NewObject(ctx.ctx);
         errdefer c.JS_FreeValue(ctx.ctx, value);
 
-        inline for (@typeInfo(T).@"struct".fields) |field| {
-            try addProp(field.type, ctx, value, field.name, @field(data, field.name));
+        if (T == std.StringHashMapUnmanaged([]const u8)) {
+            var it = data.iterator();
+            while (it.next()) |entry| {
+                try addProp([]const u8, ctx, value, entry.key_ptr.*, entry.value_ptr.*);
+            }
+        } else {
+            inline for (@typeInfo(T).@"struct".fields) |field| {
+                try addProp(field.type, ctx, value, field.name, @field(data, field.name));
+            }
         }
 
         return value;
@@ -102,7 +109,7 @@ pub const Context = struct {
     };
 
     pub const RenderOptions = struct {
-        data: ?Data,
+        data: ?Data = null,
     };
     pub const RenderResult = struct {
         html: []const u8,
@@ -115,6 +122,10 @@ pub const Context = struct {
     pub fn init() !Context {
         const runtime = c.JS_NewRuntime() orelse return error.CannotAllocateJSRuntime;
         errdefer c.JS_FreeRuntime(runtime);
+
+        // TODO make this configurable
+        c.JS_SetMemoryLimit(runtime, 0x100000);
+        c.JS_SetMaxStackSize(runtime, 0x100000);
 
         const ctx = c.JS_NewContext(runtime) orelse return error.CannotAllocateJSContext;
         errdefer c.JS_FreeContext(ctx);
@@ -141,15 +152,16 @@ pub const Context = struct {
         return !contains_unsafe_characters;
     }
 
-    pub fn register(self: *Context, arena: mem.Allocator, name: []const u8, src: []const u8) !void {
+    pub fn register(self: *Context, arena: mem.Allocator, name: []const u8, src: [:0]const u8) !void {
         debug.assert(safeModuleName(name));
+        std.log.debug("Registering component ({s})...", .{name});
 
-        const key = try arena.dupe(u8, name);
+        const key = try arena.dupeZ(u8, name);
         const mod = c.JS_Eval(
             self.ctx,
-            @ptrCast(src),
+            src,
             src.len,
-            @ptrCast(key),
+            key,
             c.JS_EVAL_TYPE_MODULE,
         );
         errdefer c.JS_FreeValue(self.ctx, mod);
@@ -165,6 +177,8 @@ pub const Context = struct {
         result.value_ptr.* = .{
             .mod = mod,
         };
+
+        std.log.debug("Registered component ({s})", .{name});
     }
 
     pub fn render(self: *Context, arena: mem.Allocator, name: []const u8, opts: RenderOptions) !RenderResult {
@@ -177,16 +191,15 @@ pub const Context = struct {
         if (opts.data) |data| {
             const value = c.JS_DupValue(self.ctx, data.payload);
             const res = c.JS_SetPropertyStr(self.ctx, global_object, "data", value);
-            std.log.info("Set global data res {d}", .{res});
+            std.log.debug("Set global data res {d}", .{res});
         }
 
         var buf: std.ArrayList(u8) = .init(arena);
         defer buf.deinit();
+        std.log.debug("Try to render component ({s})", .{name});
         try buf.writer().print(
             \\import * as c from '{s}';
             \\globalThis.html = globalThis.data ? c.render(data) : c.render();
-            \\globalThis.script = c.js;
-            \\globalThis.style = c.css;
         ,
             .{name},
         );
@@ -209,10 +222,11 @@ pub const Context = struct {
         const html = html: {
             const html = c.JS_GetPropertyStr(self.ctx, global_object, "html");
             defer c.JS_FreeValue(self.ctx, html);
+            std.log.debug("html tag {d}", .{html.tag});
             switch (html.tag) {
                 c.JS_TAG_EXCEPTION => try handleException(self.ctx),
                 c.JS_TAG_STRING => {},
-                else => return error.UnexpectedValue,
+                else => return error.UnexpectedHtmlValue,
             }
 
             const str = c.JS_ToCString(self.ctx, html);
@@ -237,7 +251,6 @@ pub const Context = struct {
         defer buf.deinit();
         try buf.writer().print(
             \\import * as c from '{s}';
-            \\globalThis.html = globalThis.data ? c.render(data) : c.render();
             \\globalThis.script = c.js;
             \\globalThis.style = c.css;
         ,
@@ -296,7 +309,7 @@ pub const Context = struct {
     }
 };
 
-fn handleException(ctx: *c.JSContext) !noreturn {
+pub fn handleException(ctx: *c.JSContext) !noreturn {
     const exception = c.JS_GetException(ctx);
     defer c.JS_FreeValue(ctx, exception);
 
